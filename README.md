@@ -12,6 +12,7 @@ I built some models to predict how many positive feedback that review can get.
 Result:
 <br>
 MAE of lm is  2.977924 
+<br>
 MAE of nb glm is  2.974029
 <br>
 Negative binomial regressions model has more variables than linear model.
@@ -23,6 +24,8 @@ It should contain more words related to topic1(trial?) though this is not statis
 It should contain more words and they should be neutral.
 
 
+<br>
+<br>
 <br>
 
 https://rpubs.com/bk_stats/Text_Analysis_of_Women_s_E_Commerce_Clothing_Reviews
