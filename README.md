@@ -15,7 +15,7 @@ MAE of lm is  2.977924
 <br>
 MAE of nb glm is  2.974029
 <br>
-Negative binomial regressions model has more variables than linear model.
+Negative binomial regression model has more variables than linear model.
 <br>
 Title shoud be blank(???).
 <br>
@@ -27,5 +27,6 @@ It should contain more words and they should be neutral.
 <br>
 <br>
 <br>
-
+notebook
+<br>
 https://rpubs.com/bk_stats/Text_Analysis_of_Women_s_E_Commerce_Clothing_Reviews
