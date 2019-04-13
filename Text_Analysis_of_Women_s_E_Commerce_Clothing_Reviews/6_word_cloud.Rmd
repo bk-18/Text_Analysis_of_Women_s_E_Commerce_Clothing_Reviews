@@ -1,0 +1,136 @@
+---
+title: "Text Analysis of Women's E-Commerce Clothing Reviews"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+  html_notebook:
+    toc: yes
+    toc_float: yes
+date: "`r Sys.Date()`"
+---
+
+<br>
+<br>
+<br>
+
+## wordcloud {.tabset .tabset-fade}
+
+### topic_1
+```{r, warning = FALSE}
+set.seed(2018)
+my_cloud1 <- c_token %>% 
+  anti_join(stop_words, by = "word") %>% 
+  filter(!str_detect(word, "\\d"),
+         !str_detect(word,"_")) %>% 
+  left_join(m_gamma %>% 
+              group_by(document) %>% 
+              top_n(1, gamma) %>% 
+              ungroup(), by = c("no" = "document")
+  ) %>% 
+  filter(topic == 1) %>% 
+  count(word) %>% 
+  filter(n >= 50) %>% 
+  wordcloud2(size = 10, gridSize = 5)
+
+saveWidget(my_cloud1, file = "tmp1.html", selfcontained = FALSE)
+  img1 <- webshot::webshot("tmp1.html", file = "wc1.png", delay = 5, vwidth = 1000, vheight = 700)
+
+tags$a(href = "tmp1.html",
+       tags$img(src = img1, alt = ""))
+```
+
+
+### topic_2
+```{r, warning = FALSE, echo = FALSE}
+set.seed(2018)
+my_cloud2 <- c_token %>% 
+  anti_join(stop_words, by = "word") %>% 
+  filter(!str_detect(word, "\\d"),
+         !str_detect(word,"_")) %>% 
+  left_join(m_gamma %>% 
+              group_by(document) %>% 
+              top_n(1, gamma) %>% 
+              ungroup(), by = c("no" = "document")
+  ) %>% 
+  filter(topic == 2) %>% 
+  count(word) %>% 
+  filter(n >= 50) %>% 
+  wordcloud2(size = 10, gridSize = 5)
+
+saveWidget(my_cloud2, file = "tmp2.html", selfcontained = FALSE)
+  img2 <- webshot::webshot("tmp2.html", file = "wc2.png", delay = 5, vwidth = 1000, vheight = 700)
+
+tags$a(href = "tmp2.html",
+       tags$img(src = img2, alt = ""))
+```
+
+### topic_3
+
+```{r, warning = FALSE, echo = FALSE}
+set.seed(2018)
+my_cloud3 <- c_token %>% 
+  anti_join(stop_words, by = "word") %>% 
+  filter(!str_detect(word, "\\d"),
+         !str_detect(word,"_")) %>% 
+  left_join(m_gamma %>% 
+              group_by(document) %>% 
+              top_n(1, gamma) %>% 
+              ungroup(), by = c("no" = "document")
+  ) %>% 
+  filter(topic == 3) %>% 
+  count(word) %>% 
+  filter(n >= 50) %>% 
+  wordcloud2(size = 10, gridSize = 5)
+
+saveWidget(my_cloud3, file = "tmp3.html", selfcontained = FALSE)
+  img3 <- webshot::webshot("tmp3.html", file = "wc3.png", delay = 5, vwidth = 1000, vheight = 700)
+
+tags$a(href = "tmp3.html",
+       tags$img(src = img3, alt = ""))
+```
+
+### topic_4
+```{r, warning = FALSE, echo = FALSE}
+set.seed(2018)
+my_cloud4 <- c_token %>% 
+  anti_join(stop_words, by = "word") %>% 
+  filter(!str_detect(word, "\\d"),
+         !str_detect(word,"_")) %>% 
+  left_join(m_gamma %>% 
+              group_by(document) %>% 
+              top_n(1, gamma) %>% 
+              ungroup(), by = c("no" = "document")
+  ) %>% 
+  filter(topic == 4) %>% 
+  count(word) %>% 
+  filter(n >= 50) %>% 
+  wordcloud2(size = 10, gridSize = 5)
+
+saveWidget(my_cloud4, file = "tmp4.html", selfcontained = FALSE)
+  img4 <- webshot::webshot("tmp4.html", file = "wc4.png", delay = 5, vwidth = 1000, vheight = 700)
+
+tags$a(href = "tmp4.html",
+       tags$img(src = img4, alt = ""))
+```
+```{r, include = FALSE}
+rm(img1, img2, img3, img4)
+rm(my_cloud1, my_cloud2, my_cloud3, my_cloud4)
+```
+
+
+
+```{r, include = FALSE}
+# letter_cloud <- c_token %>% 
+#   anti_join(stop_words, by = "word") %>% 
+#   filter(!str_detect(word, "\\d"),
+#          !str_detect(word, "_")) %>% 
+#   count(word) %>% 
+#   letterCloud(word = "enjoy!", size =10)
+# 
+# saveWidget(letter_cloud, file = "letter.html", selfcontained = FALSE) 
+# img_letter <- webshot::webshot("letter.html", file = "wc_letter.png", delay = 5, vwidth = 1000, vheight = 700)
+# 
+# tags$a(href="tmp_letter.html",
+#        tags$img(src=img_letter, alt=""))
+```

@@ -1,0 +1,317 @@
+---
+title: "Text Analysis of Women's E-Commerce Clothing Reviews"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+  html_notebook:
+    toc: yes
+    toc_float: yes
+date: "`r Sys.Date()`"
+---
+
+
+
+<br>
+<br>
+<br>
+
+# modeling
+
+<br>
+モデリング用のデータを作成。<br>
+posinegaのratioなど。
+```{r, warning = FALSE, message = FALSE}
+h_data_for_analysis <- h_data_for_analysis %>%
+  left_join(m_gamma %>%
+              mutate(topic = str_c("topic_", topic)) %>%
+              spread(key = topic, value = gamma, fill = 0),
+            by = c("no" = "document"))
+
+t_data_for_modeling <- h_data_for_analysis %>% 
+  mutate(posi_ratio = posi_total / word_cnt,
+         nega_ratio = nega_total / word_cnt) %>% 
+  dplyr::select(-c("no", "posi_total", "nega_total", "sent_total", "topic_4")) %>% 
+  mutate(department = department %>% as.factor()) %>% 
+  makedummies() %>% 
+  filter(complete.cases(.) == TRUE)
+```
+
+<br>
+
+平均と標準偏差を確認。
+```{r}
+u_mean <- mean(t_data_for_modeling$feedback, na.rm = TRUE)
+v_var <- var(t_data_for_modeling$feedback, na.rm = TRUE)
+cat("mean", u_mean, "\nvar", v_var)
+```
+
+<br>
+
+得られた数値を元に分布を描画。
+```{r}
+t_data_for_modeling %>% 
+  dplyr::select(feedback) %>% 
+  mutate(data = "actual") %>%
+  dplyr::rename(cnt = feedback) %>% 
+  bind_rows(data_frame(cnt = rnbinom(n = 100000, size = 0.466, mu = u_mean)) %>% 
+              mutate(data = "nbinom"),
+            data_frame(cnt = rnorm(n = 100000, mean = u_mean, sd = sqrt(v_var))) %>%
+              mutate(data = "norm")) %>%
+  ggplot(aes(cnt, colour = data, linetype = data)) +
+  geom_line(stat = "density", adjust = 2) +
+  scale_linetype_manual(values = c("solid", "dashed", "longdash"))
+```
+
+
+
+### linear
+
+<br>
+ベースモデルとして線形回帰モデルを構築。<br>
+分布の確認。
+```{r}
+t_data_for_modeling %>% 
+  dplyr::select(feedback) %>% 
+  mutate(data = "actual") %>% 
+  dplyr::rename(cnt = feedback) %>% 
+  bind_rows(data_frame(cnt = rnorm(100000, mean = u_mean, sd = sqrt(v_var))) %>% 
+              mutate(data = "norm")) %>% 
+  ggplot(aes(cnt, colour = data, linetype = data)) +
+  geom_line(stat = "density", adjust = 2) +
+  scale_linetype_manual(values = c("solid", "dashed"))
+```
+
+<br>
+
+線形関係の確認。
+```{r}
+cor(t_data_for_modeling %>% 
+      dplyr::select(-feedback, feedback)) %>% 
+  cor.plot(xlas = 2)
+```
+
+```{r}
+cor(t_data_for_modeling %>% 
+      dplyr::select(-feedback, feedback)) %>% 
+  round(1) %>% 
+  DT::datatable(options = list(pageLength = 17))
+```
+<br>
+多重共線性が疑われるrecommendを除外。
+```{r}
+t_data_for_modeling <- t_data_for_modeling %>% 
+  dplyr::select(-recommend)
+```
+<br>
+<br>
+
+```{r}
+w_lm <- lm(feedback ~ ., data = t_data_for_modeling)
+summary(w_lm)
+```
+
+```{r, results = "hide"}
+x_lm_step <- stepAIC(w_lm)
+```
+
+```{r}
+summary(x_lm_step)
+```
+
+```{r}
+car::vif(x_lm_step)
+```
+多重共線性は見られない。
+
+<br>
+
+回帰診断図。
+```{r}
+par(mfrow = c(2, 2))
+plot(x_lm_step)
+par(mfrow = c(1, 1))
+```
+等分散性、独立性、正規性に問題？
+
+<br>
+<br>
+
+
+### negative binomial
+
+```{r}
+t_data_for_modeling %>% 
+  dplyr::select(feedback) %>% 
+  rename(cnt = feedback) %>% 
+  mutate(data = "actual") %>% 
+  bind_rows(data_frame(cnt = rnbinom(100000, size = 0.466, mu = u_mean)) %>% 
+              mutate(data = "nb")) %>% 
+  ggplot(aes(cnt, colour = data, linetype = data)) +
+  geom_line(stat = "density", adjust = 2) +
+  scale_linetype_manual(values = c("solid", "dashed"))
+```
+
+```{r}
+z_nb <- glm.nb(feedback ~ . ,data = t_data_for_modeling)
+summary(z_nb)
+```
+<br>
+
+過分散検定。
+```{r}
+odTest(z_nb)
+```
+有意と出たのでポアソン回帰より、負の二項回帰が適切。
+
+<br>
+```{r, results = "hide"}
+za_nb_step <- stepAIC(z_nb)
+```
+
+```{r}
+summary(za_nb_step)
+```
+
+```{r}
+car::vif(za_nb_step)
+```
+
+<br>
+<br>
+<br>
+
+# model comparison
+
+mean absolute error
+```{r}
+zb_mae_lm <- mean(abs(t_data_for_modeling$feedback - fitted.values(x_lm_step)))
+zc_mae_nb <- mean(abs(t_data_for_modeling$feedback - fitted.values(za_nb_step)))
+cat("MAE of lm is ", zb_mae_lm, "\nMAE of nb glm is ", zc_mae_nb)
+```
+
+```{r, message = FALSE, warning = FALSE}
+za_nb_step %>% 
+  tidy() %>% 
+  rename(estimate_nb = estimate,
+         p.value_nb = p.value) %>%
+  dplyr::select(term, estimate_nb, p.value_nb) %>% 
+  mutate_if(is.double, funs(round(., digits = 2))) %>% 
+  left_join(x_lm_step %>%
+              tidy() %>%
+              rename(estimate_lm = estimate,
+                     p.value_lm = p.value) %>%
+              dplyr::select(term, estimate_lm, p.value_lm) %>% 
+              mutate_if(is.double, funs(round(., digits = 2))),
+            by = "term") %>%
+  dplyr::select(term, estimate_lm, p.value_lm, estimate_nb, p.value_nb) %>% 
+  DT::datatable(options = list(pageLength = 13))
+
+```
+負の二項回帰の方がステップワイズ後に残った変数が多い。<br>
+titleは空欄の方が良い？<br>
+有意ではないがtopic_1（trial？）の話題を多く入れた方が良い。<br>
+reviewは単語数を多くして、感情を表現する単語は使わない方が良い。<br>
+
+<br>
+<br>
+
+title_filledについて確認。
+```{r, warning = FALSE}
+t_data_for_modeling %>% 
+  mutate(title_filled = title_filled %>% as.factor()) %>% 
+  ggplot(aes(x = title_filled, y = feedback)) +
+  geom_boxplot() +
+  scale_y_continuous(limits = c(NA,10))
+```
+
+```{r}
+t_data_for_modeling %>% 
+  group_by(title_filled) %>% 
+  summarise(avg = mean(feedback),
+            med = median(feedback)) %>% 
+  DT::datatable(rownames = FALSE, options = list(pageLength = 2))
+```
+
+```{r}
+t_data_for_modeling %>% 
+  group_by(title_filled) %>% 
+  do(qtile = quantile(.$feedback, seq(0, 1, by = 0.1))) %>% 
+  cbind(do.call(rbind, .$qtile)) %>% 
+  dplyr::select(-qtile) %>% 
+  DT::datatable(rownames = FALSE, options = list(pageLength = 2))
+```
+
+
+```{r, warning = FALSE}
+t_data_for_modeling %>% 
+  mutate(title_filled = title_filled %>% as.factor()) %>% 
+  ggplot(aes(x = title_filled, y = feedback, fill = title_filled)) +
+  geom_violin() +
+  scale_y_continuous(limits = c(NA, 10))
+```
+
+<br>
+<br>
+<br>
+
+## residuals
+
+```{r, warning = FALSE}
+data.frame(actual = t_data_for_modeling$feedback,
+       resi_lm = fitted.values(x_lm_step) - t_data_for_modeling$feedback, 
+       resi_nb = fitted.values(za_nb_step) - t_data_for_modeling$feedback) %>% 
+  gather(key = method, value = residual, resi_lm, resi_nb) %>% 
+  ggplot(aes(x = actual, y = residual, colour = method)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0) +
+  facet_grid( ~ method)
+```
+
+
+
+```{r, warning = FALSE}
+grid.arrange(
+  data.frame(actual = t_data_for_modeling$feedback,
+             predict = fitted.values(x_lm_step)) %>%
+    round(0) %>%
+    gather(key = method, value = feedback, actual, predict) %>%
+    count(method, feedback) %>%
+    ggplot(aes(x = feedback, y = n, fill = method)) +
+    geom_col(width = 1, position = "dodge") +
+    xlim(c(-5, 10)) +
+    labs(title = "linear"),
+
+  data.frame(actual = t_data_for_modeling$feedback,
+             predict = fitted.values(za_nb_step)) %>%
+    round(0) %>%
+    gather(key = method, value = feedback, actual, predict) %>%
+    count(method, feedback) %>%
+    ggplot(aes(x = feedback, y = n, fill = method)) +
+    geom_col(width = 1, position = "dodge") +
+    xlim(c(-5, 10)) +
+    labs(title = "negative binomial"),
+  
+  ncol = 2)
+```
+
+```{r}
+data.frame(actual = t_data_for_modeling$feedback,
+       resi_lm = fitted.values(x_lm_step) - t_data_for_modeling$feedback, 
+       resi_nb = fitted.values(za_nb_step) - t_data_for_modeling$feedback) %>% 
+  gather(key = method, value = residual, resi_lm, resi_nb) %>% 
+  ggplot(aes(x = residual, colour = method)) +
+  geom_line(stat = "density") +
+  geom_vline(xintercept = 0, alpha = 0.3)
+```
+
+```{r, warning = FALSE}
+data.frame(actual = t_data_for_modeling$feedback,
+       resi_lm = fitted.values(x_lm_step) - t_data_for_modeling$feedback, 
+       resi_nb = fitted.values(za_nb_step) - t_data_for_modeling$feedback) %>% 
+  gather(key = method, value = residual, resi_lm, resi_nb) %>% 
+  ggplot(aes(x = residual, colour = method)) +
+  geom_line(stat = "density") +
+  xlim(c(-5, 5)) +
+  geom_vline(xintercept = 0, alpha = 0.3)
+```

@@ -1,0 +1,409 @@
+---
+title: "Text Analysis of Women's E-Commerce Clothing Reviews"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+  html_notebook:
+    toc: yes
+    toc_float: yes
+date: "`r Sys.Date()`"
+---
+
+
+https://www.kaggle.com/nicapotato/womens-ecommerce-clothing-reviews<br>
+アパレルECサイトの商品レビューデータから、どのような投稿をすればより多くの"Positive Feedback"を獲得できるのかを分析する。
+<br>
+"Positive Feedback"とは、投稿したレビューが他のユーザーから「有益である」と判定された時に獲得できる。
+<br>
+<br>
+<br>
+<br>
+
+# library
+
+```{r library, results = "hide", message = FALSE}
+library(dplyr)
+library(tidyverse)
+library(tidytext)
+library(stringr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+library(wordcloud)
+library(reshape2)
+library(igraph)
+library(ggraph)
+library(widyr)
+library(purrr)
+library(psych)
+library(MASS)
+library(SnowballC)
+library(glmmML)
+library(topicmodels)
+library(ldatuning)
+library(rpart)
+library(partykit)
+library(randomForest)
+library(wordcloud)
+library(wordcloud2)
+library(ggrepel)
+library(car)
+library(broom)
+library(pscl)
+library(mpath)
+library(webshot)
+library(htmlwidgets)
+library(DT)
+library(htmltools)
+library(gridExtra)
+library(knitr)
+library(devtools)
+library(makedummies)
+webshot::install_phantomjs()
+```
+
+
+```{r, include = FALSE, cashe = FALSE}
+opts_chunk$set(cache = TRUE,
+               message = FALSE,
+               warning = FALSE)
+```
+
+<br>
+<br>
+<br>
+
+# loading
+```{r loading}
+a_row <- read.csv("Womens Clothing E-Commerce Reviews.csv", 
+                  stringsAsFactors = FALSE, sep = ",")
+
+b_data <- a_row %>% 
+  rename(no = X,
+         item_id = Clothing.ID,
+         age = Age,
+         title = Title,
+         review = Review.Text,
+         rate = Rating,
+         recommend = Recommended.IND,
+         feedback = Positive.Feedback.Count,
+         division = Division.Name,
+         department = Department.Name,
+         class = Class.Name)
+
+b_data$no <- as.factor(b_data$no)
+b_data$item_id <- as.factor(b_data$item_id)
+```
+<br>
+<br>
+<br>
+
+
+# overall
+```{r, message = FALSE}
+b_data %>% 
+  head(2) %>% 
+  DT::datatable()
+```
+<br>
+<br>
+
+```{r str}
+str(b_data)
+```
+
+```{r summary}
+summary(b_data %>% dplyr::select(-c(no, item_id)))
+```
+
+```{r, include = FALSE}
+apply(b_data, 2, table) %>% head()
+```
+<br>
+item_idの分布を確認する。
+```{r}
+b_data %>% 
+  count(item_id) %>% 
+  ggplot(aes(x = n)) +
+  geom_histogram()
+```
+1つしかないものが多い。<br>
+100以上のもののみ抽出し、説明変数に入れても良いが、今回はこの後item_idそのものを除外する。
+
+
+<br>
+<br>
+
+最も多く出現したitem_idを抽出。
+```{r}
+b_data %>% 
+  semi_join(b_data %>% 
+              count(item_id) %>% 
+              top_n(1, n), by = "item_id") %>%
+  summarise(item_id = first(item_id),
+            rate_avg = mean(rate),
+            recommend_avg = mean(recommend),
+            feedback_avg = mean(feedback))
+  
+```
+ 
+ 
+<br>
+<br>
+<br>
+
+# processing
+
+<br>
+
+### unique check
+ひとつのitem_idに対して複数のdivision,department,classが振られていないか確認する。  
+最初にカテゴリーの内容確認。
+```{r category names}
+b_data %>% 
+  dplyr::select(class) %>% 
+  unique() %>% 
+  filter(class != "") %>% 
+  mutate(row_num = row_number()) %>% 
+  left_join(b_data %>% 
+              dplyr::select(department) %>% 
+              unique() %>% 
+              filter(department != "") %>% 
+              mutate(row_num = row_number()),
+            by = "row_num") %>% 
+  left_join(b_data %>% 
+              dplyr::select(division) %>% 
+              unique() %>% 
+              filter(division != "") %>% 
+              mutate(row_num = row_number()),
+            by = "row_num") %>% 
+  dplyr::select(-row_num) %>% 
+    arrange(division, department, class) %>% 
+  mutate_all(funs(replace(., is.na(.), ""))) %>% 
+  dplyr::select(division, department, class) %>% 
+  datatable(class = "cell-border stripe", rownames = FALSE, options = list(pageLength = 20))
+
+```
+
+
+```{r category unique}
+n_distinct(b_data$item_id)
+n_distinct(b_data$item_id, b_data$division)
+n_distinct(b_data$item_id, b_data$department)
+n_distinct(b_data$item_id, b_data$class)
+```
+division,classを加えるとユニークにならない。
+
+<br>
+```{r category, include = FALSE}
+b_data %>% 
+  count(item_id, division, department, class) %>% 
+  count(item_id) %>% 
+  filter(nn > 1) %>% head()
+```
+
+<br>
+classがユニークになっていないitem_idを確認する。
+```{r class}
+b_data %>% 
+  count(item_id, class) %>% 
+  count(item_id) %>% 
+  filter(nn > 1) %>% 
+  head() %>% 
+  data.frame()
+```
+
+
+```{r item_id1119}
+b_data %>% 
+  filter(item_id == 1119) %>%
+  dplyr::select(item_id, division, department, class) %>% 
+  head()
+```
+
+<br>
+原因は不明。ユニークになっているdepartmentのみを使用し、divisionとclassは削除。
+```{r only department}
+b_data <- b_data %>% 
+  dplyr::select(-division, -class)
+```
+
+
+<br>
+<br>
+<br>
+
+# missing values
+<br>
+NAの数を確認。
+```{r count na}
+b_data %>% 
+  sapply(is.na) %>% 
+  colSums()
+```
+
+<br>
+空欄の数を確認。
+```{r count blank}
+b_data %>% 
+  sapply(function(x){
+    x == ""
+  }) %>% 
+  colSums()
+```
+
+<br>
+titleが空欄の影響。
+```{r title blank}
+b_data %>% 
+  group_by(title == "") %>% 
+  summarise(mean_fb = mean(feedback),
+            median_fb = median(feedback))
+```
+
+
+
+```{r title blank histo, warning = FALSE}
+b_data %>%
+  mutate(title_blank = ifelse(title == "", "blank", "filled")) %>%
+  group_by(title_blank) %>% 
+  mutate(title_blank_n = n()) %>% 
+  ungroup() %>% 
+  count(feedback, title_blank_n, title_blank) %>% 
+  mutate(ratio = n / title_blank_n) %>% 
+  ggplot(aes(x = feedback, y = ratio, fill = title_blank)) +
+  geom_col(position = "dodge", alpha = 0.7, width = 1) +
+  xlim(-1, 20)
+```
+
+<br>
+reviewの空欄。
+```{r blank in blank, warning = FALSE}
+b_data %>%
+  mutate(review_blank = ifelse(review == "", "blank", "filled")) %>%
+  group_by(review_blank) %>% 
+  mutate(review_blank_n = n()) %>% 
+  ungroup() %>% 
+  count(feedback, review_blank_n, review_blank) %>% 
+  mutate(ratio = n / review_blank_n) %>% 
+  dplyr::select(feedback, ratio, review_blank) %>% 
+  ggplot(aes(x = feedback, y = ratio, fill = review_blank)) +
+  geom_col(position = "dodge", alpha = 0.7, width = 1) +
+  xlim(-1, 20)
+```
+reviewが空欄の場合、feedbackが付かないので除外する。
+<br>
+
+```{r count blank in review}
+b_data %>% 
+  filter(review == "") %>% 
+  count(feedback)
+```
+
+
+```{r exclude blank in review}
+b_data <- b_data %>% 
+  filter(review != "")
+```
+
+
+```{r count blank again}
+b_data %>% 
+  sapply(function(b_data){
+    b_data == ""
+  }) %>% 
+  colSums()
+```
+
+<br>
+departmentの空欄について確認する。
+```{r}
+b_data %>% 
+  filter(department == "")
+```
+
+<br>
+item_idでdepartmentを特定できないか検証。
+```{r}
+b_data %>% 
+  semi_join(b_data %>% 
+              filter(department == ""),
+            by = "item_id") %>% 
+  dplyr::select(item_id, department) %>% 
+  filter(department != "")
+```
+departmentが空欄のitem_idは、全てdepartmentが空欄であるので、特定はできない。
+
+
+<br>
+departmentの空欄は"blank"を代入。
+```{r}
+b_data$department[b_data$department == ""] <- "blank"
+```
+
+```{r}
+b_data %>% 
+  sapply(function(b_data){
+    b_data == ""
+  }) %>% 
+  colSums()
+```
+<br>
+
+```{r}
+b_data %>% 
+  str()
+```
+
+
+<br>
+<br>
+<br>
+
+# correlation
+
+```{r}
+cor(b_data[, which(sapply(b_data, is.integer))],
+    use = "pairwise.complete.obs")
+```
+
+```{r}
+pairs.panels(b_data[, which(sapply(b_data, is.integer))],
+             lm = TRUE, ellipses = FALSE, stars = TRUE, density = FALSE)
+```
+多重共線性を考慮するとrecommendを除外するべきか？<br>
+feedbackとの間に線形関係は見られない。<br>
+線形回帰は難しいか。
+
+<br>
+<br>
+<br>
+
+
+# target variable
+```{r}
+b_data %>% 
+  count(feedback) %>% 
+  ggplot(aes(x = feedback, y = n)) +
+  geom_col(width = 1)
+```
+<br>
+<br>
+feedback40以下に絞る。
+```{r, warning = FALSE}
+b_data %>% 
+  count(feedback) %>% 
+  ggplot(aes(x = feedback, y = n)) +
+  geom_col(width = 1) +
+  xlim(-1, 40)
+```
+
+```{r}
+describe(b_data$feedback)
+```
+* 非負
+* 離散値
+* 上限無し
+* 平均 < 分散<br>
+→負の二項分布？

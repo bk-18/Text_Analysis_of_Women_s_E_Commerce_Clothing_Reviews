@@ -1,0 +1,317 @@
+---
+title: "Text Analysis of Women's E-Commerce Clothing Reviews"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+  html_notebook:
+    toc: yes
+    toc_float: yes
+date: "`r Sys.Date()`"
+---
+
+
+
+<br>
+<br>
+<br>
+
+
+
+# topic modeling
+
+```{r, warning = FALSE}
+i_dtm <- c_token %>% 
+  filter(!str_detect(word, "\\d")) %>% 
+  anti_join(stop_words, by = "word") %>% 
+  mutate(no = as.factor(no)) %>% 
+  count(no, word) %>%
+  cast_dtm(no, word, n)
+```
+
+```{r}
+j_for_topic <- i_dtm[apply(i_dtm, 1, sum) > 0, ]
+```
+<br>
+適切なトピック数を推定。
+```{r}
+# system.time(k_topic_number <- FindTopicsNumber(
+#   j_for_topic,
+#   topics = seq(from = 2, to = 10, by = 1),
+#   metrics = c("Griffiths2004", "CaoJuan2009", "Arun2010", "Deveaud2014"),
+#   method = "Gibbs",
+#   control = list(seed = 2018),
+#   mc.cores = 2L,
+#   verbose = TRUE
+# ))
+```
+user|system|elapsed 
+----|------|--------
+1.905|1.388|551.116
+
+
+```{r, include = FALSE}
+#write_csv(k_topic_number, "k_topic_number.csv")
+k_topic_number <- read_csv("k_topic_number.csv")
+```
+
+<br>
+```{r}
+FindTopicsNumber_plot(k_topic_number)
+```
+Griffiths2004……周辺尤度<br>
+CaoJuan2009……cos類似度<br>
+Arun2010……距離?<br>
+Deveaud2014……KLダイバージェンス
+
+<br>
+<br>
+解釈性も考慮し、トピック数は4で進める。
+<br>
+```{r}
+l_lda <- LDA(j_for_topic, k = 4, control = list(seed = 2018))
+```
+
+<br>
+γ値によってトピックによる分類度合いを確認。<br>
+γ値とは文書の構成単語の何割がそのトピックから発生したかを示す（？）
+```{r}
+m_gamma <- l_lda %>% 
+  tidy(matrix = "gamma") %>% 
+  mutate(document = factor(document, levels = unique(c_token$no)))
+```
+
+
+
+```{r, warning = FALSE, message = FALSE}
+m_gamma %>% 
+  ggplot(aes(gamma)) +
+  geom_histogram() +
+  scale_y_log10() +
+  labs(x = expression(gamma))
+```
+あまり分類されていない。
+<br>
+
+```{r, warning = FALSE, message = FALSE}
+m_gamma %>% 
+  ggplot(aes(gamma, fill = factor(topic))) +
+  geom_histogram() +
+  facet_wrap( ~ topic) +
+  scale_y_log10() +
+  labs(x = expression(gamma))
+```
+
+<br>
+
+どの基準で別れたのか決定木で確認。
+```{r, warning = FALSE}
+n_for_tree <- h_data_for_analysis %>% 
+  left_join(m_gamma %>% 
+              group_by(document) %>% 
+              top_n(1, gamma) %>% 
+              ungroup(),
+            by = c("no" = "document")) %>% 
+  dplyr::select(-gamma, -no) %>% 
+  mutate(topic = factor(topic))
+```
+
+```{r, fig.width = 17, fig.height = 7}
+o_tree_res <- rpart(topic ~ ., data = n_for_tree,
+                    method = "class", cp = 0.005)
+plot(as.party(o_tree_res))
+```
+departmentによる分岐が強い？
+<br>
+department別にγ値を確認。
+```{r, warning = FALSE}
+m_gamma %>% 
+  left_join(h_data_for_analysis, by = c("document" = "no")) %>% 
+  mutate(department = reorder(department, gamma * topic)) %>% 
+  ggplot(aes(factor(topic), gamma)) +
+  geom_boxplot() +
+  facet_wrap( ~ department, nrow = 2) +
+  labs(x = "topic number", y = expression(gamma))
+```
+あまり分かれていない。
+<br>
+```{r}
+p_beta <- l_lda %>% 
+  tidy(matrix = "beta")
+```
+
+<br>
+
+各トピックのβ値上位20単語。<br>
+β値とは単語分布のパラメータ（？）<br>
+トピックの解釈を試みる。
+```{r}
+p_beta %>% 
+  anti_join(stop_words, by = c("term" = "word")) %>% 
+  group_by(topic) %>% 
+  top_n(15, beta) %>% 
+  ungroup() %>% 
+  group_by(topic, term) %>% 
+  arrange(desc(beta)) %>% 
+  ungroup() %>% 
+  mutate(term = reorder(str_c(term, topic, sep = "__"), beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap( ~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_discrete(labels = function(x){
+    gsub("__.+$", "", x)
+  }) +
+  labs(x = NULL, y = expression(beta))
+```
+
+<br>
+
+stop_wordsを除外した上で、各トピックβ値上位20単語のβ値を比較し、トピックの解釈を行う。
+```{r}
+p_beta %>% 
+  anti_join(stop_words, by = c("term" = "word")) %>% 
+  semi_join(p_beta %>% 
+              anti_join(stop_words, by = c("term" = "word")) %>% 
+              group_by(topic) %>% 
+              top_n(10, beta) %>% 
+              ungroup(), by = "term") %>% 
+  group_by(topic) %>% 
+  mutate(term = reorder(term, desc(beta))) %>% 
+  ggplot(aes(x = factor(topic), y = beta)) +
+  geom_bar(stat = "identity", show.legend = FALSE, aes(fill = topic)) +
+  facet_wrap( ~ term, nrow = 2) +
+  labs(x = "topic", y = expression(beta))
+```
+
+<br>
+
+解釈の難しい1,4のみ抽出して比較。
+```{r}
+p_beta %>% 
+  anti_join(stop_words, by = c("term" = "word")) %>% 
+  semi_join(p_beta %>% 
+              anti_join(stop_words, by = c("term" = "word")) %>% 
+              group_by(topic) %>% 
+              top_n(10, beta) %>% 
+              ungroup(), by = "term") %>% 
+  group_by(topic) %>% 
+  mutate(term = reorder(term, desc(beta))) %>% 
+  filter(topic %in% c("1", "4")) %>% 
+  ggplot(aes(x = factor(topic), y = beta)) +
+  geom_bar(stat = "identity", show.legend = FALSE, aes(fill = topic)) +
+  facet_wrap( ~ term, nrow = 2) +
+  labs(x = "topic", y = expression(beta))
+```
+topic1--trialの値が高い。<br>
+topic2--top,skirt,sweaterとnegativeな単語の値が高い。<br>
+topic3--onlineとsizeの値が高い。<br>
+topic4--dressとpositiveな単語の値が高い。<br>
+
+<br>
+
+以下、解釈がずれていないか確認を行う。
+```{r, warning = FALSE}
+q_topic_data <- b_data %>% 
+  inner_join(m_gamma %>% 
+               group_by(document) %>% 
+               top_n(1, gamma) %>% 
+               ungroup(), by = c("no" = "document")) %>% 
+  mutate(topic = topic %>% factor()) %>% 
+  filter(!is.na(topic))
+```
+
+<br>
+
+トピックごとのデータ概観。
+```{r, include = FALSE}
+by(q_topic_data %>% 
+     dplyr::select(age, rate, recommend, feedback), 
+   list(a = q_topic_data$topic %>% factor()), describe)
+```
+
+```{r}
+q_topic_data %>% 
+  group_by(topic) %>% 
+  summarise(age_avg = mean(age) %>% round(2),
+            rate_avg = mean(rate) %>% round(2),
+            feedback_avg = mean(feedback) %>% round(2)) %>% 
+  DT::datatable(rownames = FALSE)
+```
+
+
+<br>
+
+love, veri, perfectの単語のβ値が高かったtopic1,4はrateが高い？
+```{r}
+q_topic_data %>% 
+  group_by(topic) %>% 
+  summarise(rate_avg = mean(rate, na.rm = TRUE),
+            rate_std = sd(rate, na.rm = TRUE))
+```
+若干だが平均が高く出ている。
+
+<br>
+
+dressのβ値が高いtopic4はdepartmentがdressの割合が高いか？
+```{r}
+q_topic_data %>% 
+  count(topic, department) %>% 
+  group_by(topic) %>% 
+  mutate(ratio = n / sum(n),
+         department = reorder(department, ratio)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = topic, y = ratio, fill = department)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_y_continuous(labels = percent) +
+  geom_text_repel(aes(label = percent(ratio)), position = position_stack(vjust = 0.5), point.padding = 0, segment.size = 0)
+```
+高く出ている。
+
+<br>
+
+sizeの値が高いtopic3は、数字が多いか？
+```{r, warning = FALSE}
+c_token %>% 
+  inner_join(m_gamma %>% 
+               group_by(document) %>% 
+               top_n(1, gamma) %>% 
+               ungroup(), by = c("no" = "document")) %>% 
+  mutate(digit_bool = str_detect(word, "\\d")) %>%
+  group_by(topic) %>%
+  mutate(word_cnt = n()) %>%
+  ungroup() %>%
+  group_by(topic) %>% 
+  summarise(digit_cnt = sum(digit_bool, na.rm = TRUE),
+            digit_ratio = sum(digit_bool, na.rm = TRUE) / first(word_cnt)) %>% 
+  DT::datatable(rownames = FALSE)
+```
+若干高い。topic4も高く出ている。
+
+<br>
+
+tf_idfによるトピック解釈.
+
+```{r, warning = FALSE}
+c_token %>% 
+  filter(!str_detect(word, "\\d")) %>% 
+  left_join(m_gamma %>% 
+              group_by(document) %>% 
+              top_n(1, gamma) %>% 
+              ungroup(), by = c("no" = "document")) %>%
+  count(topic, word) %>% 
+  filter(n >= 30) %>% 
+  bind_tf_idf(word, topic, n) %>% 
+  group_by(topic) %>% 
+  top_n(10, tf_idf) %>% 
+  ungroup() %>% 
+  mutate(word = reorder(str_c(word, topic, sep = "__"), tf_idf)) %>% 
+  ggplot(aes(word, tf_idf, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap( ~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_discrete(labels = function(x){
+    gsub("__.+$", "", x)
+  })
+```
+tf_idfによるは解釈が困難。

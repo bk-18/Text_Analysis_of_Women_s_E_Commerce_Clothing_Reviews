@@ -1,0 +1,77 @@
+---
+title: "Text Analysis of Women's E-Commerce Clothing Reviews"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+  html_notebook:
+    toc: yes
+    toc_float: yes
+date: "`r Sys.Date()`"
+---
+
+
+<br>
+<br>
+<br>
+
+## network
+
+<br>
+トピック別に単語ネットワークを作成し解釈を試みる。
+```{r, warning = FALSE, include = FALSE}
+# r_pair_cor <- c_token %>% 
+#   anti_join(stop_words, by = "word") %>% 
+#   left_join(m_gamma %>% 
+#               group_by(document) %>% 
+#               top_n(1, gamma) %>% 
+#               ungroup(), by = c("no" = "document")) %>% 
+#   count(topic, word) %>% 
+#   filter(n >= 50) %>% 
+#   ungroup() %>% 
+#   pairwise_cor(word, topic, sort = TRUE)
+# 
+# r_pair_cor %>% 
+#   filter(!near(1, correlation),
+#          correlation > 0.5) %>% 
+#   graph_from_data_frame() %>% 
+#   ggraph(layout = "fr") +
+#   geom_edge_link(aes(alpha = correlation, width = correlation)) +
+#   geom_node_point(size = 4, colour = "lightblue") +
+#   geom_node_text(aes(label = name), repel = TRUE)
+```
+
+```{r, warning = FALSE}
+for(i in 1:4){
+  set.seed(2018)
+  xxx <- c_token %>% 
+    anti_join(stop_words, by = "word") %>% 
+    filter(!str_detect(word, "\\d")) %>% 
+    left_join(m_gamma %>% 
+                group_by(document) %>% 
+                top_n(1, gamma) %>% 
+                ungroup(), by = c("no" = "document")) %>% 
+    filter(topic == i) %>% 
+    count(no, word) %>% 
+    filter(n >= 5) %>% 
+    ungroup() %>% 
+    pairwise_cor(word, no, sort = TRUE) %>% 
+    filter(!near(correlation, 1)) %>% 
+    graph_from_data_frame() %>% 
+    ggraph(layout = "fr") +
+    geom_edge_link(aes(alpha = correlation, width = correlation), colour = "lightgray") +
+    scale_edge_width(range = c(0.1, 1)) +
+    geom_node_point(size = 3, colour = "darkblue") +
+    geom_node_text(aes(label = name), repel = TRUE) +
+    labs(tite = str_c("topic_", i, sep = ""))
+  
+  
+  plot(xxx)
+}
+```
+```{r, include = FALSE}
+rm(xxx); rm(i)
+```
+
+<br>
+解釈はできず。

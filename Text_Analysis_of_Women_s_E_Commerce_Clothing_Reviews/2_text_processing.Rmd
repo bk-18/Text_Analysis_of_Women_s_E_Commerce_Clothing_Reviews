@@ -1,0 +1,91 @@
+---
+title: "Text Analysis of Women's E-Commerce Clothing Reviews"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+  html_notebook:
+    toc: yes
+    toc_float: yes
+date: "`r Sys.Date()`"
+---
+
+
+<br>
+<br>
+<br>
+
+
+# tokenisation
+
+```{r}
+c_token <- b_data %>% 
+  unnest_tokens(word, review)
+```
+
+```{r}
+c_token %>% 
+  filter(no == 0) %>% 
+  dplyr::select(word) %>% 
+  mutate(row_num = row_number()) %>% 
+    left_join(b_data %>% 
+                filter(no == 0) %>% 
+                dplyr::select(review) %>% 
+                mutate(row_num = 1),
+              by = "row_num") %>% 
+  dplyr::select(review, word) %>% 
+  dplyr:::rename(before_token = review,
+                 after_token = word) %>% 
+   datatable(class = "cell-border stripe", rownames = FALSE, options = list(pageLength = 20))
+
+```
+
+<br>
+<br>
+<br>
+
+# stemming
+<br>
+stemmingで変化した単語のうち数の多いもの。
+```{r}
+c_token %>% 
+  mutate(word_stem = wordStem(word, language = "en")) %>% 
+  filter(word != word_stem) %>% 
+  group_by(word_stem) %>% 
+  mutate(word_stem_n = n()) %>% 
+  ungroup() %>% 
+  group_by(word, word_stem, word_stem_n) %>% 
+  summarise(word_n = n()) %>%
+  dplyr::select(word, word_n, word_stem, word_stem_n) %>% 
+  arrange(desc(word_stem_n)) %>% 
+  head(20) %>% 
+  datatable(class = "cell-border stripe", rownames = FALSE, options = list(pageLength = 20))
+```
+
+<br>
+
+stopwordsを除外した後のstemming上位。
+```{r}
+c_token %>% 
+  anti_join(stop_words) %>% 
+  mutate(word_stem = wordStem(word, language = "en")) %>% 
+  filter(word != word_stem) %>% 
+  group_by(word_stem) %>% 
+  mutate(word_stem_n = n()) %>% 
+  ungroup() %>% 
+  group_by(word, word_stem, word_stem_n) %>% 
+  summarise(word_n = n()) %>%
+  dplyr::select(word, word_n, word_stem, word_stem_n) %>% 
+  arrange(desc(word_stem_n)) %>% 
+  head(20) %>% 
+  datatable(class = "cell-border stripe", rownames = FALSE, options = list(pageLength = 20))
+```
+
+
+```{r}
+c_token <- c_token %>% 
+  mutate(word_stem = wordStem(word, language = "en")) %>% 
+  rename(word_ori = word,
+         word = word_stem)
+```
+
